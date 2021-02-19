@@ -39,7 +39,7 @@ func (l blockList) unblock() {
 	for range time.Tick(time.Hour) {
 		now = time.Now()
 		for k, v := range l {
-			if v.Count >= 5 && v.Tme.Add(time.Hour*6).Before(now) {
+			if v.Tme.Add(time.Hour * 6).Before(now) {
 				mx.Lock()
 				delete(l, k)
 				blog.Info("unblock", k)
@@ -101,8 +101,8 @@ func (l blockList) Add(ip string) {
 		l[ip] = b
 	}
 	b.Count++
+	b.Tme = time.Now()
 	if b.Count >= 5 {
-		b.Tme = time.Now()
 		blog.Notice("ip block", ip)
 		err := l.Dumps()
 		if err != nil {
