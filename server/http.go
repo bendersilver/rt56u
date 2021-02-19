@@ -4,8 +4,11 @@ import (
 	"bufio"
 	"bytes"
 	"io"
+	"net"
 	"net/http"
 	"strings"
+
+	"github.com/bendersilver/blog"
 )
 
 type replaceFn func(b io.ReadCloser, w *io.PipeWriter)
@@ -70,7 +73,19 @@ func replaceURL(host string) replaceFn {
 	}
 }
 
+var block = newBlockList()
+
 func handler(w http.ResponseWriter, r *http.Request) {
+	h, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		blog.Error(err)
+	} else {
+		if block.Check(h) {
+			http.Error(w, "you block", http.StatusUnauthorized)
+			return
+		}
+	}
+
 	switch r.Method {
 	case http.MethodPost, http.MethodGet:
 		var path string
@@ -80,27 +95,39 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		switch {
 
 		case path == "jsonAPI":
-			jsonAPI(w, r)
+			if strings.HasPrefix(h, "192.168") {
+				jsonAPI(w, r)
+			} else {
+				block.Add(h)
+			}
 		case path == "plst.m3u":
 			playList(w, r)
 		case match(path, "www", "js", "css", "favicon.ico"):
-			fileServ(w, r)
+			if strings.HasPrefix(h, "192.168") {
+				fileServ(w, r)
+			} else {
+				block.Add(h)
+			}
 		case path == "xml.gz":
-			transfer("http://ott.tv.planeta.tc/epg/program.xml.gz", w, nil)
+			transfer("http://ott.tv.planeta.tc/epg/program.xml?fields=desc&fields=icon", w, nil)
 		case match(path, "cache"):
 			transfer("http:/"+r.RequestURI, w, nil)
 		case path == "playlist":
 			transfer("http://playlist.tv.planeta.tc"+r.RequestURI, w, replaceURL(r.Host))
 		default:
 			http.Error(w, "page not found", http.StatusNotFound)
+			block.Add(h)
 		}
 	default:
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		block.Add(h)
 	}
 }
 
 // New -
 func New(port string) (svr *http.Server) {
+
+	go block.unblock()
 	svr = new(http.Server)
 	svr.Addr = port
 	svr.Handler = http.HandlerFunc(handler)

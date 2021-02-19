@@ -24,10 +24,6 @@ func init() {
 }
 
 func jsonAPI(w http.ResponseWriter, r *http.Request) {
-	if _, err := r.Cookie("zaq12wsxAS"); err != nil {
-		w.WriteHeader(http.StatusNotFound)
-		return
-	}
 	var p M3U
 	p.Loads()
 
@@ -60,13 +56,10 @@ func jsonAPI(w http.ResponseWriter, r *http.Request) {
 }
 
 func fileServ(w http.ResponseWriter, req *http.Request) {
-	// blog.Debug(req.RemoteAddr)
-	if _, err := req.Cookie("zaq12wsxAS"); err == nil {
-		if req.URL.Path == "/www/" {
-			http.ServeFile(w, req, path.Join(static, "index.html"))
-		} else {
-			http.ServeFile(w, req, path.Join(static, req.URL.Path))
-		}
+	if req.URL.Path == "/www/" {
+		http.ServeFile(w, req, path.Join(static, "index.html"))
+	} else {
+		http.ServeFile(w, req, path.Join(static, req.URL.Path))
 	}
 }
 
