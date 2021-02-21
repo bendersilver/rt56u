@@ -4,11 +4,9 @@ import (
 	"bufio"
 	"bytes"
 	"io"
-	"net"
 	"net/http"
 	"strings"
-
-	"github.com/bendersilver/blog"
+	"time"
 )
 
 type replaceFn func(b io.ReadCloser, w *io.PipeWriter)
@@ -76,51 +74,72 @@ func replaceURL(host string) replaceFn {
 var block = newBlockList()
 
 func handler(w http.ResponseWriter, r *http.Request) {
-	h, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		blog.Error(err)
+	h, private := isPrivate(r.RemoteAddr)
+	if !private && block.Check(h) {
+		http.Error(w, "you block", http.StatusUnauthorized)
 	} else {
-		if block.Check(h) {
-			http.Error(w, "you block", http.StatusUnauthorized)
-			return
+		switch r.Method {
+		case http.MethodPost, http.MethodGet:
+			var path string
+			if ar := strings.Split(r.URL.Path, "/"); len(ar) > 1 {
+				path = ar[1]
+			}
+			switch {
+
+			case path == "jsonAPI" && private:
+				jsonAPI(w, r)
+			case path == "plst.m3u":
+				playList(w, r)
+			case match(path, "www", "js", "css", "favicon.ico") && private:
+				fileServ(w, r)
+			case path == "xml.gz":
+				transfer("http://ott.tv.planeta.tc/epg/program.xml?fields=desc&fields=icon", w, nil)
+			case match(path, "cache"):
+				transfer("http:/"+r.RequestURI, w, nil)
+			case path == "playlist":
+				transfer("http://playlist.tv.planeta.tc"+r.RequestURI, w, replaceURL(r.Host))
+			default:
+				http.Error(w, "page not found", http.StatusNotFound)
+				block.Add(h)
+			}
+		default:
+			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+			block.Add(h)
 		}
 	}
 
+}
+
+// BlockItem -
+type BlockItem struct {
+	Count int
+	Tme   time.Time
+}
+
+// Handler -
+type Handler struct {
+	Block map[string]*BlockItem
+	// Router map[string]func(pat string)
+	r *http.Request
+	w http.ResponseWriter
+}
+
+// Func -
+func (h *Handler) Func(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodPost, http.MethodGet:
-		var path string
-		if ar := strings.Split(r.URL.Path, "/"); len(ar) > 1 {
-			path = ar[1]
-		}
-		switch {
-
-		case path == "jsonAPI":
-			if strings.HasPrefix(h, "192.168") {
-				jsonAPI(w, r)
-			} else {
-				block.Add(h)
-			}
-		case path == "plst.m3u":
-			playList(w, r)
-		case match(path, "www", "js", "css", "favicon.ico"):
-			if strings.HasPrefix(h, "192.168") {
-				fileServ(w, r)
-			} else {
-				block.Add(h)
-			}
-		case path == "xml.gz":
-			transfer("http://ott.tv.planeta.tc/epg/program.xml?fields=desc&fields=icon", w, nil)
-		case match(path, "cache"):
-			transfer("http:/"+r.RequestURI, w, nil)
-		case path == "playlist":
-			transfer("http://playlist.tv.planeta.tc"+r.RequestURI, w, replaceURL(r.Host))
-		default:
-			http.Error(w, "page not found", http.StatusNotFound)
-			block.Add(h)
-		}
 	default:
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
-		block.Add(h)
+		// block.Add(h)
+	}
+}
+
+// Method -
+func (h *Handler) Method(method string) {
+	if h.r.Method == method {
+
+	} else {
+		http.Error(h.w, "Method Not Allowed", http.StatusMethodNotAllowed)
 	}
 }
 
