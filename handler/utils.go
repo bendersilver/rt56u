@@ -1,10 +1,63 @@
 package handler
 
 import (
+	"fmt"
+	"io"
 	"net"
-
-	"github.com/bendersilver/blog"
+	"strings"
 )
+
+func toString(b []byte) string {
+	return strings.TrimSpace(string(b))
+}
+
+// ParseHeader -
+func ParseHeader(r io.Reader, bufLen int) (method, path, host string, err error) {
+	var buf = make([]byte, bufLen)
+	var i, line int
+	var sep []int
+	for {
+		if bufLen <= i {
+			err = fmt.Errorf("malformed HTTP")
+			return
+		}
+		if _, err = r.Read(buf[i : i+1]); err != nil {
+			return
+		}
+		// end header
+		if i == 1 && buf[1] == '\n' {
+			break
+		}
+		if buf[i] == ' ' {
+			sep = append(sep, i)
+		}
+		if buf[i] == '\n' {
+			line++
+			switch line {
+			case 1:
+				if len(sep) == 2 {
+					method = toString(buf[:sep[0]])
+					path = toString(buf[sep[0]:sep[1]])
+				} else {
+					err = fmt.Errorf("malformed HTTP")
+					return
+				}
+			case 2:
+				if len(sep) == 1 {
+					host = toString(buf[sep[0]:i])
+				} else {
+					err = fmt.Errorf("malformed MIME header")
+					return
+				}
+			}
+			i = 0
+			sep = nil
+		} else {
+			i++
+		}
+	}
+	return
+}
 
 // defaultFilteredNetworks net.IPNets that are loopback, private, link local, default unicast
 // based on https://github.com/letsencrypt/boulder/blob/master/bdns/dns.go
@@ -28,7 +81,7 @@ var privateNet = []net.IPNet{
 func mustParseCIDR(s string) net.IPNet {
 	_, ipnet, err := net.ParseCIDR(s)
 	if err != nil {
-		blog.Fatal(err)
+		panic(err)
 	}
 	return *ipnet
 }
@@ -39,9 +92,6 @@ func IsPrivate(addr string) bool {
 	if err != nil {
 		return false
 	}
-	// if h == "localhost" {
-	// 	return true
-	// }
 	ip := net.ParseIP(h)
 	for _, ipnet := range privateNet {
 		if ipnet.Contains(ip) {
