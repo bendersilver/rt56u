@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"net"
@@ -32,6 +33,7 @@ func ParseHeader(r io.Reader, bufLen int) (method, path, host string, err error)
 			sep = append(sep, i)
 		}
 		if buf[i] == '\n' {
+			buf = bytes.TrimSpace(buf)
 			line++
 			switch line {
 			case 1:
@@ -42,12 +44,9 @@ func ParseHeader(r io.Reader, bufLen int) (method, path, host string, err error)
 					err = fmt.Errorf("malformed HTTP")
 					return
 				}
-			case 2:
-				if len(sep) == 1 {
+			default:
+				if len(sep) > 0 && string(buf[:sep[0]]) == "Host:" {
 					host = toString(buf[sep[0]:i])
-				} else {
-					err = fmt.Errorf("malformed MIME header")
-					return
 				}
 			}
 			i = 0

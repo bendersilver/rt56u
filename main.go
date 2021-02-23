@@ -1,23 +1,30 @@
 package main
 
 import (
+	"bufio"
 	"net"
 	"os"
 	"runtime"
 	"strings"
 
 	"github.com/bot/rt56u/handler"
-	"github.com/joho/godotenv"
 )
 
 var token string
 
 func init() {
-	err := godotenv.Load()
+	f, err := os.OpenFile("./.env", os.O_RDONLY, 0644)
 	if err != nil {
 		panic(err)
 	}
-	for _, v := range []string{"TOKEN", "DIST", "BLOCKLIST", "GOB"} {
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		spl := strings.Split(scanner.Text(), "=")
+		if len(spl) > 1 {
+			os.Setenv(spl[0], strings.Join(spl[1:], "="))
+		}
+	}
+	for _, v := range []string{"TOKEN", "DIST", "GOB"} {
 		if _, ok := os.LookupEnv(v); !ok {
 			panic(v)
 		}
@@ -33,7 +40,10 @@ func Handler(con *net.TCPConn) {
 		handler.Err400(con)
 		return
 	}
-	var ptivate = !handler.IsPrivate(con.RemoteAddr().String())
+	var ptivate = handler.IsPrivate(con.RemoteAddr().String())
+	// if host == "localhost:33880" {
+	// 	ptivate = false
+	// }
 	switch method {
 	case "GET":
 		if pth == "/" || pth == "" {
@@ -51,6 +61,7 @@ func Handler(con *net.TCPConn) {
 		}
 		handler.Public(con, strings.Join(splitPath[2:], "/"), host)
 	case "POST":
+		handler.PrivatePost(con, pth)
 	default:
 		handler.Err405(con)
 		return

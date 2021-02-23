@@ -211,14 +211,19 @@ export default {
     },
     hideToggle(i) {
       i.hide = !i.hide;
-      fetch(`/jsonAPI/toggle/${i.hide}/${i.id}`);
-      this.sortingSet(this.sorting);
+      fetch("/jsonAPI/toggle", {
+        method: "POST",
+        body: JSON.stringify({id:i.id, hide: i.hide}),
+      }).then(rsp=> {
+        if (rsp.status !=  200) i.hide = !i.hide
+        else this.sortingSet(this.sorting)
+      })
     },
     serOrder(i, ix) {
       let num = parseInt(ix)
       if (num >=0) {
         i.order = num
-        this.sortingSet(this.sorting); 
+        this.sortingSet(this.sorting)
       }
     },
     saveList() {
