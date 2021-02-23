@@ -14,8 +14,6 @@ import (
 	"github.com/bendersilver/blog"
 )
 
-const uriPlst = "http://ott.tv.planeta.tc/playlist/channels.m3u?4k&groupChannels=thematic&fields=epg,group&hlsQuality=min&hlsVideoOnly"
-
 var gobFile, plstFile string
 
 func init() {
