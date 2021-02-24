@@ -3,20 +3,20 @@ package handler
 import (
 	"bufio"
 	"encoding/gob"
-	"net"
+	"net/http"
 	"os"
 	"path"
 	"regexp"
 	"sort"
 	"strings"
 	"time"
-
-	"github.com/bendersilver/blog"
 )
 
 var gobFile, plstFile string
+var cli = http.DefaultClient
 
-func init() {
+// Init -
+func Init() {
 	gobFile = path.Join(os.Getenv("GOB"), "plst")
 	plstFile = path.Join(os.Getenv("DIST"), "plst.m3u")
 	updatePlst()
@@ -117,20 +117,11 @@ func (m *M3U) Dumps() error {
 }
 
 func updatePlst() {
-	dl, err := net.Dial("tcp", "ott.tv.planeta.tc:80")
+	res, err := cli.Get("http://ott.tv.planeta.tc/playlist/channels.m3u?4k&groupChannels=thematic&fields=epg,group&hlsQuality=min&hlsVideoOnly")
 	if err != nil {
 		return
 	}
-	defer dl.Close()
-	_, err = dl.Write([]byte("GET /playlist/channels.m3u?4k&groupChannels=thematic&fields=epg,group&hlsQuality=min&hlsVideoOnly HTTP/1.0\nHosh: ott.tv.planeta.tc\nUser-Agent: go-iptv\n\n"))
-	if err != nil {
-		return
-	}
-	_, _, _, err = ParseHeader(dl, 256)
-	if err != nil {
-		return
-	}
-
+	defer res.Body.Close()
 	plstDump := M3U{}
 	plstDump.Loads()
 	defer plstDump.Dumps()
@@ -138,7 +129,7 @@ func updatePlst() {
 	var line string
 	var item *M3UItem
 
-	scanner := bufio.NewScanner(dl)
+	scanner := bufio.NewScanner(res.Body)
 Loop:
 	for scanner.Scan() {
 		line = scanner.Text()
@@ -146,9 +137,6 @@ Loop:
 		case line == "":
 			continue
 		case strings.HasPrefix(line, "http") && item != nil:
-			if err != nil {
-				blog.Error(err)
-			}
 			item.Extinf += "\n" + line + "\n"
 			item = nil
 		case strings.HasPrefix(line, "#EXTINF:"):

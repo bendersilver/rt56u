@@ -2,15 +2,16 @@ package main
 
 import (
 	"bufio"
-	"net"
+	"net/http"
 	"os"
+	"path"
 	"runtime"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/bot/rt56u/handler"
 )
-
-var token string
 
 func init() {
 	f, err := os.OpenFile("./.env", os.O_RDONLY, 0644)
@@ -29,58 +30,74 @@ func init() {
 			panic(v)
 		}
 	}
-	handler.Init()
 }
 
-// Handler -
-func Handler(con *net.TCPConn) {
-	defer con.Close()
-	method, pth, host, err := handler.ParseHeader(con, 248)
-	if err != nil {
-		handler.Err400(con)
-		return
-	}
-	var ptivate = handler.IsPrivate(con.RemoteAddr().String())
-	// if host == "localhost:33880" {
-	// 	ptivate = false
-	// }
-	switch method {
-	case "GET":
-		if pth == "/" || pth == "" {
-			pth = "/index.html"
-		}
-		if ptivate {
-			handler.Private(con, pth)
-			return
-		}
-		splitPath := strings.Split(pth, "/")
-		if len(splitPath) < 3 || splitPath[1] != os.Getenv("TOKEN") {
-			handler.Err404(con)
-			// ban
-			return
-		}
-		handler.Public(con, strings.Join(splitPath[2:], "/"), host)
-	case "POST":
-		handler.PrivatePost(con, pth)
-	default:
-		handler.Err405(con)
-		return
+var t <-chan time.Time
+var mx sync.Mutex
+
+func waitGC() {
+	mx.Lock()
+	defer mx.Unlock()
+	<-t
+	runtime.GC()
+	t = nil
+}
+
+func setTimer() {
+	mx.Lock()
+	defer mx.Unlock()
+	if t == nil {
+		t = time.Tick(time.Second * 10)
+		go waitGC()
 	}
 }
 
 func main() {
 	runtime.GOMAXPROCS(runtime.NumCPU())
-	listener, err := net.ListenTCP("tcp", &net.TCPAddr{Port: 33880})
-	if err != nil {
-		panic(err)
-	}
-	defer listener.Close()
+	handler.Init()
+	hlnd := func(w http.ResponseWriter, r *http.Request) {
+		var err error
+		var ptivate = handler.IsPrivate(r.RemoteAddr)
+		splitPath := strings.Split(r.RequestURI, "/")
 
-	for {
-		con, err := listener.AcceptTCP()
-		if err != nil {
-			continue
+		switch r.Method {
+		case http.MethodGet:
+			if len(splitPath) >= 3 && splitPath[1] == os.Getenv("TOKEN") {
+				err = handler.Public(w, strings.Join(splitPath[2:], "/"), r.Host)
+			} else if ptivate {
+				switch r.RequestURI {
+				case "/jsonAPI/get":
+					err = handler.PrivateGetJSON(w)
+				case "/xml.gz":
+					err = handler.PrivateXML(w)
+				default:
+					http.ServeFile(w, r, path.Join(os.Getenv("DIST"), r.RequestURI))
+				}
+			} else {
+				http.Error(w, "Not Found", http.StatusNotFound)
+			}
+		case http.MethodPost:
+			if ptivate && len(splitPath) == 3 && splitPath[1] == "jsonAPI" {
+				err = handler.PrivatePOST(r.Body, splitPath[2])
+
+			}
+		default:
+			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+			return
 		}
-		go Handler(con)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+		setTimer()
+
 	}
+	// go func() {
+	// 	for range time.Tick(time.Second * 5) {
+	// 		runtime.GC()
+	// 	}
+	// }()
+	svr := new(http.Server)
+	svr.Addr = ":33880"
+	svr.Handler = http.HandlerFunc(hlnd)
+	svr.ListenAndServe()
 }
