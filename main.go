@@ -7,8 +7,6 @@ import (
 	"path"
 	"runtime"
 	"strings"
-	"sync"
-	"time"
 
 	"github.com/bot/rt56u/handler"
 )
@@ -29,26 +27,6 @@ func init() {
 		if _, ok := os.LookupEnv(v); !ok {
 			panic(v)
 		}
-	}
-}
-
-var t <-chan time.Time
-var mx sync.Mutex
-
-func waitGC() {
-	mx.Lock()
-	defer mx.Unlock()
-	<-t
-	runtime.GC()
-	t = nil
-}
-
-func setTimer() {
-	mx.Lock()
-	defer mx.Unlock()
-	if t == nil {
-		t = time.Tick(time.Second * 10)
-		go waitGC()
 	}
 }
 
@@ -88,14 +66,7 @@ func main() {
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}
-		setTimer()
-
 	}
-	// go func() {
-	// 	for range time.Tick(time.Second * 5) {
-	// 		runtime.GC()
-	// 	}
-	// }()
 	svr := new(http.Server)
 	svr.Addr = ":33880"
 	svr.Handler = http.HandlerFunc(hlnd)
