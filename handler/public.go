@@ -7,33 +7,24 @@ import (
 	"strings"
 )
 
-func changeBody(w io.Writer, r io.Reader, u string) {
+func changeBody(w io.Writer, r io.Reader, uri []byte) {
 	var err error
-	var buf = make([]byte, 512)
-	var i int
-	uri := []byte(u)
+	var buf = make([]byte, 1)
+	var p byte
 	for {
-		if _, err = r.Read(buf[i : i+1]); err != nil {
-			w.Write(buf[:i])
+		_, err = r.Read(buf)
+		if err != nil {
 			break
 		}
-		// line startwish http://
-		//                     ^^
-		if i == 6 && buf[5] == '/' && buf[6] == '/' {
-
-			for ix, b := range uri {
-				buf[ix] = b
-				i = ix
+		w.Write(buf)
+		if buf[0] == '/' && p == '/' {
+			for _, s := range uri {
+				buf[0] = s
+				w.Write(buf)
 			}
 		}
-		if buf[i] == '\n' {
-			w.Write(buf[:i+1])
-			i = -1
-		}
-		i++
+		p = buf[0]
 	}
-	uri = nil
-	buf = nil
 }
 
 // transfer -
@@ -50,7 +41,7 @@ func transfer(p, h string, w http.ResponseWriter) error {
 		}
 	}
 	if strings.HasPrefix(p, "playlist.tv.planeta.tc/") {
-		changeBody(w, res.Body, "http://"+h+"/"+os.Getenv("TOKEN")+"/")
+		changeBody(w, res.Body, []byte(h+"/"+os.Getenv("TOKEN")+"/"))
 	} else {
 		io.Copy(w, res.Body)
 	}
@@ -64,7 +55,7 @@ func m3u(w http.ResponseWriter, host string) error {
 	}
 	defer f.Close()
 	w.Header().Add("Content-Type", "application/x-mpegurl; charset=utf-8")
-	changeBody(w, f, "http://"+host+"/"+os.Getenv("TOKEN")+"/")
+	changeBody(w, f, []byte(host+"/"+os.Getenv("TOKEN")+"/"))
 	return nil
 }
 
