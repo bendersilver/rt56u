@@ -59,7 +59,10 @@ func Private(con *net.TCPConn, p string) {
 	var plst M3U
 	switch p {
 	case "/xml.gz":
-		transfer("ott.tv.planeta.tc/epg/program.xml.gz", "", con)
+		err := transferFull("ott.tv.planeta.tc/epg/program.xml.gz", con)
+		if err != nil {
+			Err500(con, err.Error())
+		}
 	case "/jsonAPI/get":
 		plst.Loads()
 		b, _ := json.Marshal(plst)

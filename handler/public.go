@@ -3,67 +3,82 @@ package handler
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"io"
 	"net"
 	"os"
 	"strings"
+	"time"
 )
 
-// transfer -
-func transfer(p, h string, w io.Writer) {
-	sp := strings.Split(p, "/")
-	d, p := sp[0], strings.Join(sp[1:], "/")
-
-	dl, err := net.Dial("tcp", d+":80")
-	if err != nil {
-		Err500(w, err.Error())
+// transferFull -
+func transferFull(uri string, con io.Writer) (err error) {
+	sp := strings.Split(uri, "/")
+	if len(sp) < 2 {
+		err = errors.New("incorrect url")
 		return
 	}
-	defer dl.Close()
-	_, err = dl.Write([]byte("GET /" + p + " HTTP/1.0\nHosh: " + d + "\nUser-Agent: go-iptv\n\n"))
+	var host, path string
+	var d net.Conn
+
+	host, path = sp[0], strings.Join(sp[1:], "/")
+	d, err = net.DialTimeout("tcp", host+":80", time.Second*5)
 	if err != nil {
-		Err500(w, err.Error())
 		return
 	}
-	var buf = make([]byte, 256)
-	var i int
-	if strings.HasPrefix(p, "playlist/") {
-		var head bool = true
-		uri := []byte("http://" + h + "/" + os.Getenv("TOKEN") + "/")
-		for {
-			if _, err = dl.Read(buf[i : i+1]); err != nil {
-				w.Write(buf[:i])
-				break
-			}
-			if head {
-				if i == 1 && buf[1] == '\n' {
-					head = false
-				}
-			} else {
-				// line startwish http://
-				//                     ^^
-				if i == 6 && buf[5] == '/' && buf[6] == '/' {
-
-					for ix, b := range uri {
-						buf[ix] = b
-						i = ix
-					}
-				}
-			}
-			if buf[i] == '\n' {
-				if !bytes.HasPrefix(buf, []byte("Content-Length")) {
-					w.Write(buf[:i+1])
-				}
-				i = -1
-			}
-			i++
-		}
-	} else {
-		io.Copy(w, dl)
+	defer d.Close()
+	_, err = d.Write([]byte("GET /" + path + " HTTP/1.0\nHosh: " + host + "\nUser-Agent: go-iptv\n\n"))
+	if err != nil {
+		return
 	}
+	io.Copy(con, d)
+	return
 }
 
-func m3u(w io.Writer, host string) {
+// transfer -
+func transfer(uri string, con *net.TCPConn) (err error) {
+	sp := strings.Split(uri, "/")
+	if len(sp) < 2 {
+		err = errors.New("incorrect url")
+		return
+	}
+	var host, path string
+	var d net.Conn
+
+	host, path = sp[0], strings.Join(sp[1:], "/")
+	d, err = net.DialTimeout("tcp", host+":80", time.Second*5)
+	if err != nil {
+		return
+	}
+	defer d.Close()
+	_, err = d.Write([]byte("GET /" + path + " HTTP/1.0\nHosh: " + host + "\nUser-Agent: go-iptv\n\n"))
+	if err != nil {
+		return
+	}
+	var b = make([]byte, 1)
+	var buf []byte
+	for {
+		_, err = con.Read(b)
+		if err != nil {
+			break
+		}
+		buf = append(buf, b...)
+		if b[0] == '\n' {
+			if len(buf) == 1 {
+				break
+			} else {
+				if bytes.Index(buf, []byte("Content-Length")) == -1 {
+					con.Write(buf)
+				}
+				buf = nil
+			}
+		}
+	}
+	io.Copy(con, d)
+	return
+}
+
+func m3u(w *net.TCPConn) {
 	item, ok := static["/plst.m3u"]
 	if !ok {
 		Err404(w)
@@ -84,7 +99,7 @@ func m3u(w io.Writer, host string) {
 				io.WriteString(w,
 					strings.Replace(scanner.Text(),
 						"http:/",
-						"http://"+host+"/"+token, 1))
+						"http://"+w.LocalAddr().String()+"/"+token, 1))
 			} else {
 				io.WriteString(w, scanner.Text())
 			}
@@ -94,13 +109,18 @@ func m3u(w io.Writer, host string) {
 }
 
 // Public -
-func Public(con *net.TCPConn, path, host string) {
+func Public(con *net.TCPConn, path string) {
 	switch path {
 	case "plst.m3u":
-		m3u(con, host)
+		m3u(con)
 	case "xml.gz":
-		transfer("ott.tv.planeta.tc/epg/program.xml.gz", "", con)
+		transferFull("ott.tv.planeta.tc/epg/program.xml.gz", con)
 	default:
-		transfer(path, host, con)
+		// if strings.HasPrefix("playlist.tv.planeta.tc/") {
+		// 	transfer(path, con)
+		// } else {
+		// 	transferFull(path, con)
+		// }
+		// transfer(path, host, con)
 	}
 }

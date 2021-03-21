@@ -1,17 +1,14 @@
 package handler
 
 import (
-	"bufio"
 	"encoding/gob"
-	"net"
+	"fmt"
 	"os"
 	"path"
-	"regexp"
 	"sort"
-	"strings"
 	"time"
 
-	"github.com/bendersilver/blog"
+	"github.com/bendersilver/simplog"
 )
 
 var gobFile, plstFile string
@@ -21,41 +18,27 @@ func init() {
 	plstFile = path.Join(os.Getenv("DIST"), "plst.m3u")
 	updatePlst()
 	go func() {
-		for range time.Tick(time.Hour * 6) {
+		for range time.Tick(time.Hour) {
 			updatePlst()
 		}
 	}()
 }
 
-var reID = regexp.MustCompile(`tvg-id="([^"]+)"`)
-var reName = regexp.MustCompile(`tvg-name="([^"]+)"`)
-var reLogo = regexp.MustCompile(`tvg-logo="([^"]+)"`)
-var reGroup = regexp.MustCompile(`group-title="([^"]+)"`)
-var reRemove = regexp.MustCompile(`tvg-url="([^"]+)" `)
-
 // M3UItem -
 type M3UItem struct {
-	ID     string `json:"id"`
-	Name   string `json:"name"`
-	Logo   string `json:"img"`
-	Group  string `json:"group"`
-	Order  int    `json:"order"`
-	Del    bool   `json:"del"`
-	Hide   bool   `json:"hide"`
-	Extinf string `json:"-"`
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Logo  string `json:"img"`
+	Group string `json:"group"`
+	URL   string `json:"url"`
+	Order int    `json:"order"`
+	Del   bool   `json:"del"`
+	Hide  bool   `json:"hide"`
 }
 
-func (m *M3UItem) setFields() {
-	m.find(&m.Name, reName)
-	m.find(&m.Logo, reLogo)
-	m.find(&m.Group, reGroup)
-}
-
-func (m *M3UItem) find(f *string, re *regexp.Regexp) {
-	sub := re.FindStringSubmatch(m.Extinf)
-	if len(sub) == 2 {
-		*f = sub[1]
-	}
+func (m *M3UItem) str() string {
+	return fmt.Sprintf("#EXTINF:-1 tvg-id=\"%s\" tvg-name=\"%s\" tvg-logo=\"%s\" group-title=\"%s\",%s\n%s\n",
+		m.ID, m.Name, m.Logo, m.Group, m.Name, m.URL)
 }
 
 // M3U -
@@ -86,7 +69,6 @@ func (m *M3U) Loads() error {
 	if err != nil {
 		return err
 	}
-	sort.Sort(m)
 	return nil
 }
 
@@ -104,71 +86,66 @@ func (m *M3U) Dumps() error {
 	}
 	file.Close()
 
-	file, err = os.OpenFile(plstFile, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
+	file, err = os.OpenFile(plstFile+".tmp", os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
 	file.WriteString("#EXTM3U\n")
 	for _, line := range *m {
 		if line.Del || line.Hide {
 			continue
 		}
-		file.WriteString(line.Extinf)
+		file.WriteString(line.str())
 	}
 	file.Close()
-	return nil
+	return os.Rename(plstFile+".tmp", plstFile)
 }
 
 func updatePlst() {
-	dl, err := net.Dial("tcp", "ott.tv.planeta.tc:80")
+	var plst M3U
+	err := plst.Loads()
 	if err != nil {
-		return
-	}
-	defer dl.Close()
-	_, err = dl.Write([]byte("GET /playlist/channels.m3u?4k&groupChannels=thematic&fields=epg,group&hlsQuality=min&hlsVideoOnly HTTP/1.0\nHosh: ott.tv.planeta.tc\nUser-Agent: go-iptv\n\n"))
-	if err != nil {
-		return
-	}
-	_, _, _, err = ParseHeader(dl, 256)
-	if err != nil {
+		simplog.Error(err)
 		return
 	}
 
-	plstDump := M3U{}
-	plstDump.Loads()
-	defer plstDump.Dumps()
+	ch, err := getAll()
+	if err != nil {
+		simplog.Error(err)
+		return
+	}
+	if len(ch) < 50 {
+		simplog.Error("num channels less than 50")
+		return
+	}
+	// hide all
+	for _, item := range plst {
+		item.Del = true
+	}
 
-	var line string
-	var item *M3UItem
-
-	scanner := bufio.NewScanner(dl)
-Loop:
-	for scanner.Scan() {
-		line = scanner.Text()
-		switch {
-		case line == "":
-			continue
-		case strings.HasPrefix(line, "http") && item != nil:
-			if err != nil {
-				blog.Error(err)
-			}
-			item.Extinf += "\n" + line + "\n"
-			item = nil
-		case strings.HasPrefix(line, "#EXTINF:"):
-			line = reRemove.ReplaceAllString(line, "")
-			sub := reID.FindStringSubmatch(line)
-			if len(sub) == 2 {
-				for _, i := range plstDump {
-					if i.ID == sub[1] {
-						item = i
-						item.Extinf = line
-						item.setFields()
-						continue Loop
-					}
-				}
-				item = new(M3UItem)
-				item.ID = sub[1]
-				item.Order = len(plstDump)
-				item.setFields()
-				plstDump = append(plstDump, item)
+	// update exists
+Parent:
+	for i, c := range ch {
+		for _, item := range plst {
+			if c.URI == item.URL {
+				item.URL = c.URI
+				item.Name = c.Name
+				item.Logo = c.Tags["tvg-logo"]
+				item.Group = c.Tags["group-title"]
+				item.Del = false
+				ch[i] = nil
+				continue Parent
 			}
 		}
+		// add new
+		if id, ok := c.Tags["tvg-id"]; ok {
+			plst = append(plst, &M3UItem{
+				ID:    id,
+				URL:   c.URI,
+				Name:  c.Name,
+				Logo:  c.Tags["tvg-logo"],
+				Group: c.Tags["group-title"],
+				Order: len(plst) + 1,
+			})
+		}
+		ch[i] = nil
 	}
+	plst.Dumps()
 }

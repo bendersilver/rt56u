@@ -26,5 +26,5 @@ func Err500(w io.Writer, s string) {
 
 // Status200 -
 func Status200(w io.Writer) {
-	w.Write([]byte([]byte("HTTP/1.1 200 OK\n")))
+	w.Write([]byte([]byte("HTTP/1.1 200 OK\r\n")))
 }
