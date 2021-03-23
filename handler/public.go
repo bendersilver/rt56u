@@ -1,12 +1,10 @@
 package handler
 
 import (
-	"bufio"
 	"bytes"
 	"errors"
 	"io"
 	"net"
-	"os"
 	"strings"
 	"time"
 )
@@ -79,33 +77,33 @@ func transfer(uri string, con *net.TCPConn) (err error) {
 }
 
 func m3u(w *net.TCPConn) {
-	item, ok := static["/plst.m3u"]
-	if !ok {
-		Err404(w)
-		return
-	}
-	f, err := os.OpenFile(item.Path, os.O_RDONLY, 0644)
-	if err != nil {
-		Err500(w, err.Error())
-	} else {
-		defer f.Close()
-		Status200(w)
-		w.Write([]byte("Content-Encoding: identity\n"))
-		w.Write([]byte(item.Type))
-		token := os.Getenv("TOKEN")
-		scanner := bufio.NewScanner(f)
-		for scanner.Scan() {
-			if strings.HasPrefix(scanner.Text(), "http://") {
-				io.WriteString(w,
-					strings.Replace(scanner.Text(),
-						"http:/",
-						"http://"+w.LocalAddr().String()+"/"+token, 1))
-			} else {
-				io.WriteString(w, scanner.Text())
-			}
-			io.WriteString(w, "\n")
-		}
-	}
+	// item, ok := static["/plst.m3u"]
+	// if !ok {
+	// 	Err404(w)
+	// 	return
+	// }
+	// f, err := os.OpenFile(item.Path, os.O_RDONLY, 0644)
+	// if err != nil {
+	// 	Err500(w, err.Error())
+	// } else {
+	// 	defer f.Close()
+	// 	Status200(w)
+	// 	w.Write([]byte("Content-Encoding: identity\n"))
+	// 	w.Write([]byte(item.Type))
+	// 	token := os.Getenv("TOKEN")
+	// 	scanner := bufio.NewScanner(f)
+	// 	for scanner.Scan() {
+	// 		if strings.HasPrefix(scanner.Text(), "http://") {
+	// 			io.WriteString(w,
+	// 				strings.Replace(scanner.Text(),
+	// 					"http:/",
+	// 					"http://"+w.LocalAddr().String()+"/"+token, 1))
+	// 		} else {
+	// 			io.WriteString(w, scanner.Text())
+	// 		}
+	// 		io.WriteString(w, "\n")
+	// 	}
+	// }
 }
 
 // Public -

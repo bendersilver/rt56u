@@ -5,14 +5,17 @@ import (
 	"io"
 	"net"
 	"os"
+	"path"
 	"path/filepath"
+
+	"github.com/bendersilver/simplog"
 )
 
 // PrivatePost -
 func PrivatePost(con *net.TCPConn, p string) {
 	var plst M3U
 	switch p {
-	case "/jsonAPI/toggle":
+	case "toggle":
 		plst.Loads()
 		defer plst.Dumps()
 		var m struct {
@@ -28,9 +31,10 @@ func PrivatePost(con *net.TCPConn, p string) {
 			}
 			Status200(con)
 		} else {
-			Err500(con, err.Error())
+			Err404(con)
+			simplog.Error(err)
 		}
-	case "/jsonAPI/save":
+	case "save":
 		plst.Loads()
 		defer plst.Dumps()
 		var m []struct {
@@ -47,7 +51,8 @@ func PrivatePost(con *net.TCPConn, p string) {
 			}
 			Status200(con)
 		} else {
-			Err500(con, err.Error())
+			Err404(con)
+			simplog.Error(err)
 		}
 	default:
 		Err404(con)
@@ -61,7 +66,8 @@ func Private(con *net.TCPConn, p string) {
 	case "/xml.gz":
 		err := transferFull("ott.tv.planeta.tc/epg/program.xml.gz", con)
 		if err != nil {
-			Err500(con, err.Error())
+			Err404(con)
+			simplog.Error(err)
 		}
 	case "/jsonAPI/get":
 		plst.Loads()
@@ -70,62 +76,33 @@ func Private(con *net.TCPConn, p string) {
 		con.Write([]byte("Content-Type: application/json; charset=utf-8\r\n\r\n"))
 		con.Write(b)
 	default:
-		item, ok := static[p]
-		if ok {
-			f, err := os.OpenFile(item.Path, os.O_RDONLY, 0644)
-			if err != nil {
-				Err500(con, err.Error())
-			} else {
-				defer f.Close()
-				Status200(con)
-				con.Write([]byte(item.Type))
-				io.Copy(con, f)
-			}
-		} else {
+		f, err := os.OpenFile(path.Join(os.Getenv("DIST"), p), os.O_RDONLY, 0644)
+		if err != nil {
+			simplog.Error(err)
 			Err404(con)
+		} else {
+			defer f.Close()
+			Status200(con)
+			con.Write(cType(p))
+			io.Copy(con, f)
 		}
 	}
 }
 
-type staticFile struct {
-	Type string
-	Path string
-}
-
-var static map[string]*staticFile
-
-// Init -
-func Init() {
-
-	static = make(map[string]*staticFile)
-	err := filepath.Walk(os.Getenv("DIST"), func(p string, i os.FileInfo, err error) error {
-		if !i.IsDir() && err == nil {
-			item := new(staticFile)
-			item.Path = p
-
-			var path string
-			path, err = filepath.Rel(os.Getenv("DIST"), p)
-			switch filepath.Ext(p) {
-			case ".html":
-				item.Type = "Content-Type: text/html; charset=utf-8\r\n\r\n"
-			case ".css":
-				item.Type = "Content-Type: text/css; charset=utf-8\r\n\r\n"
-			case ".js":
-				item.Type = "Content-Type: text/javascript; charset=utf-8\r\n\r\n"
-			case ".ico":
-				item.Type = "Content-Type: image/x-icon\r\n\r\n"
-			case ".map":
-				item.Type = "Content-Type: application/json; charset=utf-8\r\n\r\n"
-			case ".m3u":
-				item.Type = "Content-Type: application/x-mpegurl; charset=utf-8\r\n\r\n"
-			default:
-				return nil
-			}
-			static["/"+path] = item
-		}
-		return err
-	})
-	if err != nil {
-		panic(err)
+func cType(p string) []byte {
+	switch filepath.Ext(p) {
+	case ".html":
+		return []byte("Content-Type: text/html; charset=utf-8\r\n\r\n")
+	case ".css":
+		return []byte("Content-Type: text/css; charset=utf-8\r\n\r\n")
+	case ".js":
+		return []byte("Content-Type: text/javascript; charset=utf-8\r\n\r\n")
+	case ".ico":
+		return []byte("Content-Type: image/x-icon\r\n\r\n")
+	case ".map":
+		return []byte("Content-Type: application/json; charset=utf-8\r\n\r\n")
+	case ".m3u":
+		return []byte("Content-Type: application/x-mpegurl; charset=utf-8\r\n\r\n")
 	}
+	return []byte("\r\n\r\n")
 }

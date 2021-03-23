@@ -2,12 +2,14 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"io"
 	"net"
 	"os"
 	"runtime"
 	"strings"
 
+	"github.com/bendersilver/simplog"
 	"github.com/bot/rt56u/handler"
 )
 
@@ -31,7 +33,6 @@ func init() {
 		}
 	}
 	token = os.Getenv("TOKEN")
-	handler.Init()
 }
 
 func readMethodPath(r io.Reader) (method, pth string, err error) {
@@ -42,14 +43,18 @@ func readMethodPath(r io.Reader) (method, pth string, err error) {
 		if err != nil {
 			break
 		}
+		if b[0] == '\n' {
+			break
+		}
 		if b[0] == ' ' {
 			if method == "" {
 				method = string(buf)
 				buf = nil
 				continue
-			} else {
+			} else if pth == "" {
 				pth = string(buf)
-				break
+				buf = nil
+				continue
 			}
 		}
 		buf = append(buf, b...)
@@ -58,23 +63,17 @@ func readMethodPath(r io.Reader) (method, pth string, err error) {
 }
 
 func passHead(r io.Reader) (err error) {
-	var b = make([]byte, 1)
-	var buf []byte
+	var b = make([]byte, 4)
 	for {
-		_, err = r.Read(b)
+		for i := 0; i < 3; i++ {
+			b[i] = b[i+1]
+		}
+		_, err = r.Read(b[3:4])
 		if err != nil {
+			return err
+		}
+		if bytes.Equal(b, []byte("\r\n\r\n")) {
 			break
-		}
-		if b[0] == '\r' {
-			continue
-		}
-		buf = append(buf, b...)
-		if b[0] == '\n' {
-			if len(buf) == 1 {
-				break
-			} else {
-				buf = nil
-			}
 		}
 	}
 	return
@@ -84,23 +83,17 @@ func passHead(r io.Reader) (err error) {
 func Handler(con *net.TCPConn) {
 	defer con.CloseWrite()
 	defer con.CloseRead()
-	var err error
-	var method, pth string
 
-	method, pth, err = readMethodPath(con)
+	method, pth, err := readMethodPath(con)
 	if err != nil {
-		handler.Err500(con, err.Error())
+		handler.Err500(con, "«Internal server error»")
+		simplog.Error(err)
 		return
 	}
 
-	err = passHead(con)
-	if err != nil {
-		handler.Err500(con, err.Error())
-		return
-	}
-
-	ptivate := handler.IsPrivate(con.LocalAddr().String())
+	ptivate := handler.IsPrivate(con.RemoteAddr().String())
 	splitPath := strings.Split(pth, "/")
+	simplog.Debug(method, ptivate, splitPath)
 
 	switch method {
 	case "GET":
@@ -114,7 +107,13 @@ func Handler(con *net.TCPConn) {
 		} else {
 			handler.Err404(con)
 		}
-		// handler.PrivatePost(con, pth)
+	case "POST":
+		passHead(con)
+		if ptivate && len(splitPath) == 3 && splitPath[1] == "jsonAPI" {
+			handler.PrivatePost(con, splitPath[2])
+		} else {
+			handler.Err404(con)
+		}
 	default:
 		handler.Err405(con)
 		return
@@ -123,25 +122,17 @@ func Handler(con *net.TCPConn) {
 
 func main() {
 	runtime.GOMAXPROCS(runtime.NumCPU())
-	// ch, err := handler.GetAllChannels()
-	// if err != nil {
-	// 	simplog.Fatal(err)
-	// }
-	// for _, c := range ch {
-	// 	simplog.Notice(c)
-	// }
-	// simplog.Fatal(handler.GetAllChannels())
-	// listener, err := net.ListenTCP("tcp", &net.TCPAddr{Port: 33880})
-	// if err != nil {
-	// 	panic(err)
-	// }
-	// defer listener.Close()
+	listener, err := net.ListenTCP("tcp", &net.TCPAddr{Port: 33880})
+	if err != nil {
+		simplog.Fatal(err)
+	}
+	defer listener.Close()
 
-	// for {
-	// 	con, err := listener.AcceptTCP()
-	// 	if err != nil {
-	// 		continue
-	// 	}
-	// 	Handler(con)
-	// }
+	for {
+		con, err := listener.AcceptTCP()
+		if err != nil {
+			continue
+		}
+		Handler(con)
+	}
 }
