@@ -66,7 +66,7 @@ func Private(con *net.TCPConn, p string) {
 	case "/xml.gz":
 		err := transferFull("ott.tv.planeta.tc/epg/program.xml.gz", con)
 		if err != nil {
-			Err404(con)
+			Err500(con, err.Error())
 			simplog.Error(err)
 		}
 	case "/jsonAPI/get":

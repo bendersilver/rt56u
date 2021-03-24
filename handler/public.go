@@ -5,12 +5,13 @@ import (
 	"errors"
 	"io"
 	"net"
+	"strconv"
 	"strings"
 	"time"
 )
 
 // transferFull -
-func transferFull(uri string, con io.Writer) (err error) {
+func transferFull(uri string, con *net.TCPConn) (err error) {
 	sp := strings.Split(uri, "/")
 	if len(sp) < 2 {
 		err = errors.New("incorrect url")
@@ -25,11 +26,61 @@ func transferFull(uri string, con io.Writer) (err error) {
 		return
 	}
 	defer d.Close()
-	_, err = d.Write([]byte("GET /" + path + " HTTP/1.0\nHosh: " + host + "\nUser-Agent: go-iptv\n\n"))
+	_, err = d.Write([]byte("GET /" + path + " HTTP/1.0\r\nHosh: " + host + "\r\n"))
 	if err != nil {
 		return
 	}
-	io.Copy(con, d)
+	// Копируем заголовки запроса
+	buf := make([]byte, 4)
+	for {
+		copy(buf, buf[1:])
+		_, err = con.Read(buf[3:4])
+		if err != nil {
+			break
+		}
+		d.Write(buf[3:4])
+		if string(buf) == "\r\n\r\n" {
+			break
+		}
+	}
+	// Content-Length
+	// Копируем заголовки ответа
+	buf = make([]byte, len([]byte("Content-Length: ")))
+	var ok bool
+	var length []byte
+	var l int = len(buf)
+	for {
+		copy(buf, buf[1:])
+		_, err = d.Read(buf[l-1 : l])
+		if err != nil {
+			break
+		}
+		con.Write(buf[l-1 : l])
+		if !ok && string(buf) == "Content-Length: " {
+			buf = make([]byte, 1)
+		num:
+			for {
+				_, err = d.Read(buf)
+				con.Write(buf)
+				if buf[0] >= 48 && buf[0] <= 57 {
+					length = append(length, buf...)
+				} else {
+					break num
+				}
+			}
+			l = 4
+			buf = make([]byte, l)
+			ok = true
+		}
+		if ok && string(buf) == "\r\n\r\n" {
+			break
+		}
+	}
+	i, err := strconv.Atoi(string(length))
+	if err != nil {
+		return err
+	}
+	io.CopyN(con, d, int64(i))
 	return
 }
 
