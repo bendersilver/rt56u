@@ -61,9 +61,7 @@ func transferFull(uri string, con *net.TCPConn) (err error) {
 	}
 	// Content-Length
 	// Копируем заголовки ответа и ищем размерность тела ответа
-	buf = make([]byte, len([]byte("Content-Length: ")))
 	var length []byte
-	l = len(buf)
 	for {
 		copy(buf, buf[1:])
 		_, err = d.Read(buf[l-1 : l])
