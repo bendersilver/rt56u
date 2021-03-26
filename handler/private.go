@@ -12,10 +12,10 @@ import (
 )
 
 // PrivatePost -
-func PrivatePost(con *net.TCPConn, p string) {
+func PrivatePost(con *net.TCPConn, m *MIMEHeader) {
 	var plst M3U
-	switch p {
-	case "toggle":
+	switch m.Path {
+	case "/jsonAPI/toggle":
 		plst.Loads()
 		defer plst.Dumps()
 		var m struct {
@@ -34,7 +34,7 @@ func PrivatePost(con *net.TCPConn, p string) {
 			Err404(con)
 			simplog.Error(err)
 		}
-	case "save":
+	case "/jsonAPI/save":
 		plst.Loads()
 		defer plst.Dumps()
 		var m []struct {
@@ -60,31 +60,30 @@ func PrivatePost(con *net.TCPConn, p string) {
 }
 
 // Private -
-func Private(con *net.TCPConn, p string) {
+func Private(w io.Writer, m *MIMEHeader) {
 	var plst M3U
-	switch p {
+	switch m.Path {
 	case "/xml.gz":
-		err := transferFull("ott.tv.planeta.tc/epg/program.xml.gz", con)
+		err := transferFull("ott.tv.planeta.tc/epg/program.xml.gz", m, w, false)
 		if err != nil {
-			Err500(con, err.Error())
+			Err500(w, err.Error())
 			simplog.Error(err)
 		}
 	case "/jsonAPI/get":
 		plst.Loads()
 		b, _ := json.Marshal(plst)
-		Status200(con)
-		con.Write([]byte("Content-Type: application/json; charset=utf-8\r\n\r\n"))
-		con.Write(b)
+		Status200(w)
+		w.Write([]byte("Content-Type: application/json; charset=utf-8\r\n\r\n"))
+		w.Write(b)
 	default:
-		f, err := os.OpenFile(path.Join(os.Getenv("DIST"), p), os.O_RDONLY, 0644)
+		f, err := os.OpenFile(path.Join(os.Getenv("DIST"), m.Path), os.O_RDONLY, 0644)
 		if err != nil {
-			simplog.Error(err)
-			Err404(con)
+			Err500(w, err.Error())
 		} else {
 			defer f.Close()
-			Status200(con)
-			con.Write(cType(p))
-			io.Copy(con, f)
+			Status200(w)
+			w.Write(cType(m.Path))
+			io.Copy(w, f)
 		}
 	}
 }

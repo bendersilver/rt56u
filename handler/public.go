@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"io/ioutil"
 	"net"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -13,84 +15,48 @@ import (
 )
 
 // transferFull -
-func transferFull(uri string, con *net.TCPConn) (err error) {
+func transferFull(uri string, m *MIMEHeader, w io.Writer, changeURL bool) (err error) {
 	sp := strings.Split(uri, "/")
 	if len(sp) < 2 {
-		err = errors.New("incorrect url")
-		return
+		return errors.New("incorrect url")
 	}
-	var host, path string
-	var d net.Conn
 
-	host, path = sp[0], strings.Join(sp[1:], "/")
-	d, err = net.DialTimeout("tcp", host+":80", time.Second*5)
-	if err != nil {
-		return
-	}
-	defer d.Close()
-	_, err = d.Write([]byte("GET /" + path + " HTTP/1.0\r\n"))
-	if err != nil {
-		return
-	}
-	// Копируем заголовки запроса
-	var buf []byte
-	var l int = 20
-	buf = make([]byte, 20)
-
-	for {
-		copy(buf, buf[1:])
-		_, err = con.Read(buf[l-1 : l])
-		if err != nil {
-			break
-		}
-		d.Write(buf[l-1 : l])
-		if string(buf[l-6:l]) == "Host: " {
-		hst:
-			for {
-				_, err = con.Read(buf[l-1 : l])
-				if buf[l-1] == '\n' {
-					break hst
-				}
-			}
-			d.Write([]byte(host))
-			d.Write([]byte("\n"))
-		}
-		if string(buf[l-4:l]) == "\r\n\r\n" {
-			break
-		}
-	}
-	// Content-Length
-	// Копируем заголовки ответа и ищем размерность тела ответа
-	var length []byte
-	for {
-		copy(buf, buf[1:])
-		_, err = d.Read(buf[l-1 : l])
-		if err != nil {
-			break
-		}
-		con.Write(buf[l-1 : l])
-		if string(buf[l-16:l]) == "Content-Length: " {
-
-		num:
-			for {
-				_, err = d.Read(buf[l-1 : l])
-				con.Write(buf[l-1 : l])
-				if buf[l-1] >= 48 && buf[l-1] <= 57 {
-					length = append(length, buf[l-1])
-				} else {
-					break num
-				}
-			}
-		}
-		if string(buf[l-4:l]) == "\r\n\r\n" {
-			break
-		}
-	}
-	i, err := strconv.Atoi(string(length))
+	host, path := sp[0], strings.Join(sp[1:], "/")
+	d, err := net.DialTimeout("tcp", host+":80", time.Second*5)
 	if err != nil {
 		return err
 	}
-	io.CopyN(con, d, int64(i))
+	defer d.Close()
+
+	_, err = d.Write([]byte("GET /" + path + " " + m.Proto + "\r\n"))
+	if err != nil {
+		return
+	}
+
+	simplog.Notice("Копируем заголовки запроса")
+	// Копируем заголовки запроса
+	m.Header["Host"] = host
+	for k, v := range m.Header {
+		d.Write([]byte(k + ": " + v + "\r\n"))
+	}
+	d.Write([]byte("\r\n"))
+
+	dHead, err := NewMIMEHeader(d)
+	if err != nil {
+		return err
+	}
+
+	// Копируем заголовки ответа
+	w.Write([]byte(dHead.Method + " " + dHead.Path + " " + dHead.Proto + "\r\n"))
+	for k, v := range dHead.Header {
+		w.Write([]byte(k + ": " + v + "\r\n"))
+	}
+	w.Write([]byte("\r\n"))
+	i, err := strconv.Atoi(string(dHead.Header["Content-Length"]))
+	if err != nil {
+		return err
+	}
+	io.CopyN(w, d, int64(i))
 	return
 }
 
@@ -137,84 +103,67 @@ func transfer(uri string, con *net.TCPConn) (err error) {
 	return
 }
 
-func m3u(w *net.TCPConn) {
-	buf := make([]byte, 2048)
-	i, err := w.Read(buf)
+// http://ott.tv.planeta.tc/plst.m3u
+func m3u(w io.Writer, m *MIMEHeader) {
+	host := m.Header["Host"]
+
+	// копируем заголовки оригинального ответа
+	d, err := net.Dial("tcp", "ott.tv.planeta.tc:80")
 	if err != nil {
-		simplog.Fatal(err)
+		return
 	}
-	simplog.Fatal(string(buf[:i]))
-	// buf := make([]byte, len([]byte("Host: ")))
-	// var ok bool
-	// var l int = len(buf)
-	// var err error
-	// for {
-	// 	copy(buf, buf[1:])
-	// 	_, err = w.Read(buf[l-1 : l])
-	// 	if err != nil {
-	// 		break
-	// 	}
-	// 	if !ok && string(buf) == "Host: " {
-	// 		buf = make([]byte, 1)
-	// 	num:
-	// 		for {
-	// 			_, err = w.Read(buf)
-	// 			if buf[0] == '\n' {
-	// 				break num
-	// 			}
-	// 			simplog.Debug(string(buf))
-	// 		}
-	// 		l = 4
-	// 		buf = make([]byte, l)
-	// 		ok = true
-	// 	}
-	// 	if ok && string(buf) == "\r\n\r\n" {
-	// 		break
-	// 	}
-	// }
-	// Status200(w)
-	// item, ok := static["/plst.m3u"]
-	// if !ok {
-	// 	Err404(w)
-	// 	return
-	// }
-	// f, err := os.OpenFile(item.Path, os.O_RDONLY, 0644)
-	// if err != nil {
-	// 	Err500(w, err.Error())
-	// } else {
-	// 	defer f.Close()
-	// 	Status200(w)
-	// 	w.Write([]byte("Content-Encoding: identity\n"))
-	// 	w.Write([]byte(item.Type))
-	// 	token := os.Getenv("TOKEN")
-	// 	scanner := bufio.NewScanner(f)
-	// 	for scanner.Scan() {
-	// 		if strings.HasPrefix(scanner.Text(), "http://") {
-	// 			io.WriteString(w,
-	// 				strings.Replace(scanner.Text(),
-	// 					"http:/",
-	// 					"http://"+w.LocalAddr().String()+"/"+token, 1))
-	// 		} else {
-	// 			io.WriteString(w, scanner.Text())
-	// 		}
-	// 		io.WriteString(w, "\n")
-	// 	}
-	// }
+	defer d.Close()
+	_, err = d.Write([]byte("GET /plst.m3u HTTP/1.0\r\n"))
+	if err != nil {
+		return
+	}
+	m.Header["Host"] = "ott.tv.planeta.tc"
+	for k, v := range m.Header {
+		d.Write([]byte(k + ": " + v + "\r\n"))
+	}
+	d.Write([]byte("\r\n"))
+
+	dHead, err := NewMIMEHeader(d)
+	if err != nil {
+		simplog.Error(err)
+	}
+
+	buf, err := ioutil.ReadFile(plstFile)
+	if err != nil {
+		return
+	}
+	buf = bytes.ReplaceAll(buf, []byte("\nhttp://"), []byte("\nhttp://"+host+"/"+os.Getenv("TOKEN")+"/"))
+	dHead.Header["Content-Length"] = strconv.Itoa(len(buf))
+	// Копируем заголовки ответа
+	w.Write([]byte(dHead.Method + " " + dHead.Path + " " + dHead.Proto + "\r\n"))
+	for k, v := range dHead.Header {
+		w.Write([]byte(k + ": " + v + "\r\n"))
+	}
+	w.Write([]byte("\r\n"))
+	w.Write(buf)
 }
 
 // Public -
-func Public(con *net.TCPConn, path string) {
-	switch path {
+func Public(w io.Writer, m *MIMEHeader) {
+	split := strings.Split(m.Path, "/")
+	if len(split) < 3 {
+		return
+	}
+	simplog.Debug(split[2])
+	switch strings.Join(split[2:], "/") {
 	case "plst.m3u":
-		m3u(con)
+		m3u(w, m)
 	case "xml.gz":
-		transferFull("ott.tv.planeta.tc/epg/program.xml.gz", con)
+		err := transferFull("ott.tv.planeta.tc/epg/program.xml.gz", m, w, false)
+		if err != nil {
+			simplog.Error(err)
+		}
 	default:
-		// if strings.HasPrefix("playlist.tv.planeta.tc/") {
-		// 	transfer(path, con)
-		// } else {
-		// 	transferFull(path, con)
-		// }
+		var replace bool
+		if split[2] == "playlist.tv.planeta.tc" {
+			replace = true
+		}
+		transferFull(strings.Join(split[2:], "/"), m, w, replace)
 		// transfer(path, host, con)
 	}
 }
