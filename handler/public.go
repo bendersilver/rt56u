@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/bendersilver/simplog"
 )
 
 // transferFull -
@@ -26,29 +28,42 @@ func transferFull(uri string, con *net.TCPConn) (err error) {
 		return
 	}
 	defer d.Close()
-	_, err = d.Write([]byte("GET /" + path + " HTTP/1.0\r\nHosh: " + host + "\r\n"))
+	_, err = d.Write([]byte("GET /" + path + " HTTP/1.0\r\n"))
 	if err != nil {
 		return
 	}
 	// Копируем заголовки запроса
-	buf := make([]byte, 4)
+	var buf []byte
+	var l int = 20
+	buf = make([]byte, 20)
+
 	for {
 		copy(buf, buf[1:])
-		_, err = con.Read(buf[3:4])
+		_, err = con.Read(buf[l-1 : l])
 		if err != nil {
 			break
 		}
-		d.Write(buf[3:4])
-		if string(buf) == "\r\n\r\n" {
+		d.Write(buf[l-1 : l])
+		if string(buf[l-6:l]) == "Host: " {
+		hst:
+			for {
+				_, err = con.Read(buf[l-1 : l])
+				if buf[l-1] == '\n' {
+					break hst
+				}
+			}
+			d.Write([]byte(host))
+			d.Write([]byte("\n"))
+		}
+		if string(buf[l-4:l]) == "\r\n\r\n" {
 			break
 		}
 	}
 	// Content-Length
 	// Копируем заголовки ответа и ищем размерность тела ответа
 	buf = make([]byte, len([]byte("Content-Length: ")))
-	var ok bool
 	var length []byte
-	var l int = len(buf)
+	l = len(buf)
 	for {
 		copy(buf, buf[1:])
 		_, err = d.Read(buf[l-1 : l])
@@ -56,23 +71,20 @@ func transferFull(uri string, con *net.TCPConn) (err error) {
 			break
 		}
 		con.Write(buf[l-1 : l])
-		if !ok && string(buf) == "Content-Length: " {
-			buf = make([]byte, 1)
+		if string(buf[l-16:l]) == "Content-Length: " {
+
 		num:
 			for {
-				_, err = d.Read(buf)
-				con.Write(buf)
-				if buf[0] >= 48 && buf[0] <= 57 {
-					length = append(length, buf...)
+				_, err = d.Read(buf[l-1 : l])
+				con.Write(buf[l-1 : l])
+				if buf[l-1] >= 48 && buf[l-1] <= 57 {
+					length = append(length, buf[l-1])
 				} else {
 					break num
 				}
 			}
-			l = 4
-			buf = make([]byte, l)
-			ok = true
 		}
-		if ok && string(buf) == "\r\n\r\n" {
+		if string(buf[l-4:l]) == "\r\n\r\n" {
 			break
 		}
 	}
@@ -128,6 +140,41 @@ func transfer(uri string, con *net.TCPConn) (err error) {
 }
 
 func m3u(w *net.TCPConn) {
+	buf := make([]byte, 2048)
+	i, err := w.Read(buf)
+	if err != nil {
+		simplog.Fatal(err)
+	}
+	simplog.Fatal(string(buf[:i]))
+	// buf := make([]byte, len([]byte("Host: ")))
+	// var ok bool
+	// var l int = len(buf)
+	// var err error
+	// for {
+	// 	copy(buf, buf[1:])
+	// 	_, err = w.Read(buf[l-1 : l])
+	// 	if err != nil {
+	// 		break
+	// 	}
+	// 	if !ok && string(buf) == "Host: " {
+	// 		buf = make([]byte, 1)
+	// 	num:
+	// 		for {
+	// 			_, err = w.Read(buf)
+	// 			if buf[0] == '\n' {
+	// 				break num
+	// 			}
+	// 			simplog.Debug(string(buf))
+	// 		}
+	// 		l = 4
+	// 		buf = make([]byte, l)
+	// 		ok = true
+	// 	}
+	// 	if ok && string(buf) == "\r\n\r\n" {
+	// 		break
+	// 	}
+	// }
+	// Status200(w)
 	// item, ok := static["/plst.m3u"]
 	// if !ok {
 	// 	Err404(w)

@@ -98,7 +98,7 @@ func Handler(con *net.TCPConn) {
 	switch method {
 	case "GET":
 		if len(splitPath) >= 3 && splitPath[1] == token {
-			// handler.Public(con, strings.Join(splitPath[2:], "/"), con.LocalAddr().String())
+			handler.Public(con, strings.Join(splitPath[2:], "/"))
 		} else if ptivate {
 			if pth == "/" || pth == "" {
 				pth = "/index.html"
